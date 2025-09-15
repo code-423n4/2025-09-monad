@@ -829,7 +829,6 @@ storage_pool::activate_chunk(chunk_type const which, uint32_t const id)
     if (ret) {
         return ret;
     }
-    g.unlock();
     auto &chunkinfo = chunks_[which][id];
     switch (which) {
     case chunk_type::cnv:
