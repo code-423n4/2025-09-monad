@@ -35,6 +35,10 @@ The following issues and risks are considered **known** or **by design** and wil
 - Block policy discounts gas price by incorrectly applying EIP-1559 to legacy transactions (C4 staff note: this issue was addressed by a public [PR](https://github.com/category-labs/monad-bft/pull/2386) on September 25, 2025 at 18:30 UTC; therefore all submissions of this finding after that timestamp will be considered out of scope.)
 - Reserve balance checks were not applied consistently to create transactions, e.g. CREATE / CREATE2 (C4 staff note: there was a public PR originally created to address this issue on September 16, 2025 at 15:38 UTC; therefore all submissions related to this finding after that timestamp will be considered out of scope.)
 - Duplicated validation logic for EIP-7702 authorization lists. (C4 staff note: this issue was addressed by a public [PR](https://github.com/category-labs/monad-bft/pull/2365))
+- 2025-09-28, 15:20 UTC: Monad `testnet-2` crashed due to a bug at 2025-09-27 09:23 UTC. The description of the bug is as follows: 
+    > Execution enforces that the reserve balance is protected by examining the balances before and after transaction execution and making a decision on whether or not to revert that transaction. The current implementation of reserve balance is missing adjustments for relaxed merge.
+    - `testnet-2` was recovered by [disabling relaxed merge](https://github.com/category-labs/monad/pull/1735) while a more tailored fix is pending. This bug will be considered out of scope from the time of the crash and for the remainder of the audit competition. Any other findings related to relaxed merge (i.e. outside of this interaction with reserve balance) are still in scope.
+    - This `README` will be updated again once the issue has been addressed in full.
 
 ### General Risks
 
