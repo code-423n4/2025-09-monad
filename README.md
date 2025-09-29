@@ -39,6 +39,7 @@ The following issues and risks are considered **known** or **by design** and wil
     > Execution enforces that the reserve balance is protected by examining the balances before and after transaction execution and making a decision on whether or not to revert that transaction. The current implementation of reserve balance is missing adjustments for relaxed merge.
     - `testnet-2` was recovered by [disabling relaxed merge](https://github.com/category-labs/monad/pull/1735) while a more tailored fix is pending. This bug will be considered out of scope from the time of the crash and for the remainder of the audit competition. Any other findings related to relaxed merge (i.e. outside of this interaction with reserve balance) are still in scope.
     - This `README` will be updated again once the issue has been addressed in full.
+- Nonce overflow check in block validator (C4 staff note: this issue was addressed by a public [PR](https://github.com/category-labs/monad-bft/pull/2388).)
 
 ### General Risks
 
