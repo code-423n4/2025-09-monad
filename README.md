@@ -949,6 +949,63 @@ The codebase uses features of the Linux kernel and makes use of instructions spe
 
 For more information on build environment configuration, you can refer to [the docker build configurations](https://github.com/category-labs/monad/blob/8cd73a6186366fe52529ab1050b2e6a388af4893/docker/release.Dockerfile#L1-L87)
 
+## Building C++ (Monad Directory) on Ubuntu 24: Docker Recommended
+
+Ubuntu 24 users may encounter build errors when building the C++ components (in the `monad` directory). For a reliable build process, we recommend using Docker with the Ubuntu 25.04 base image.
+
+### Converting SSH to HTTPS in Git Submodules
+
+Before building, you need to change all SSH URLs to HTTPS in `.gitmodules` files (including those in subdirectories):
+
+**Example conversion:**
+```
+# From:
+url = git@github.com:asmjit/asmjit.git
+
+# To:
+url = https://github.com/asmjit/asmjit.git
+```
+
+### Running Docker Without Tests
+
+**If the `monad-base` image already exists:**
+```bash
+docker run -it -v $(pwd):/src monad-base bash
+```
+
+**If you need to build the image first (from the `monad` directory):**
+```bash
+# First build the image
+docker build -f ./docker/release.Dockerfile -t monad-base .
+
+# Then run it
+docker run -it -v $(pwd):/src monad-base bash
+```
+
+### Building Inside Docker
+
+Once inside the Docker container (you'll see a bash prompt), run these commands:
+
+```bash
+# Navigate to source directory
+cd /src
+
+# Clean previous build artifacts
+rm -rf build/
+
+# Configure with Clang 19 (if GCC fails)
+CC=clang-19 CXX=clang++-19 CMAKE_BUILD_TYPE=Release \
+  CFLAGS="-march=haswell" \
+  CXXFLAGS="-march=haswell" \
+  ASMFLAGS="-march=haswell" \
+  ./scripts/configure.sh
+
+# Build the project
+./scripts/build.sh
+```
+
+**Note:** This configuration uses Clang 19 as the compiler and optimizes for Haswell architecture, which should resolve most GCC-related build issues.
+
 
 ## Miscellaneous
 Employees of Category Labs or Asymmetric Research, and employees' family members are ineligible to participate in this audit.
