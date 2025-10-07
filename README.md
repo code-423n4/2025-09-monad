@@ -106,6 +106,7 @@ Contains the Monad consensus client and JsonRpc server. Monad consensus collects
 
 - **Previous audits:** previously audited by Zellic and Spearbit, reports being finalized.
 - **Documentation:** https://docs.monad.xyz
+  - _Note: Please refer to docs as the source of truth with respect to the MonadBFT specification. The MonadBFT paper is in the process of being updated to align with the implementation._
 - **Website:** https://www.monad.xyz
 - **X/Twitter:** https://x.com/monad
 
