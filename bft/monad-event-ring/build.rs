@@ -48,10 +48,8 @@ fn main() {
 
     let mut builder = bindgen::Builder::default()
         .header("wrapper.h")
-        .clang_args(["-x", "c", "-std=c23"])
+        .clang_args(["-x", "c++", "-std=c++20"])
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .wrap_static_fns(true)
-        .wrap_static_fns_path(out_dir.join(STATIC_FNS_PATH))
         .derive_copy(true)
         .derive_debug(true)
         .derive_partialeq(true)
@@ -75,16 +73,4 @@ fn main() {
         .replace(r#"#[doc = " "#, r#"#[doc = ""#);
 
     std::fs::write(out_dir.join("bindings.rs"), bindings_str).expect("Couldn't write bindings!");
-
-    cc::Build::new()
-        .std("c2x")
-        .file(out_dir.join(format!("{STATIC_FNS_PATH}.c")))
-        .includes(
-            std::iter::once(PathBuf::from(env!("CARGO_MANIFEST_DIR"))).chain(
-                INCLUDES
-                    .iter()
-                    .map(|(include_path, _)| PathBuf::from(include_path)),
-            ),
-        )
-        .compile(STATIC_FNS_PATH);
 }

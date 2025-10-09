@@ -38,8 +38,7 @@ fn main() {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
 
     let mut builder = bindgen::Builder::default()
-        .header("wrapper.h")
-        .clang_args(["-x", "c", "-std=c23"])
+        .clang_args(["-x", "c++", "-std=c++20"])
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .derive_copy(true)
         .derive_debug(true)
@@ -56,7 +55,8 @@ fn main() {
         builder = builder.clang_arg(format!("-I{lib_path}"));
 
         for lib_file in lib_files.iter() {
-            builder = builder.allowlist_file(format!("{lib_path}{lib_file}"));
+            let path = format!("{lib_path}{lib_file}");
+            builder = builder.header(path.clone()).allowlist_file(path);
         }
     }
 

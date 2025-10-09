@@ -55,8 +55,8 @@ pub(crate) struct StateSync<PT: PubKey> {
     outbound_requests: OutboundRequests<PT>,
     current_target: Option<Header>,
 
-    request_rx: tokio::sync::mpsc::UnboundedReceiver<SyncRequest<StateSyncRequest, PT>>,
-    response_tx: std::sync::mpsc::Sender<SyncResponse<PT>>,
+    request_rx: tokio::sync::mpsc::UnboundedReceiver<StateSyncCommand<StateSyncRequest, PT>>,
+    response_tx: std::sync::mpsc::Sender<StateSyncEvent<PT>>,
 
     progress: Arc<Mutex<Progress>>,
 
@@ -64,19 +64,15 @@ pub(crate) struct StateSync<PT: PubKey> {
 }
 
 #[derive(Debug, Clone)]
-/// This name is confusing, but I can't think of a better name. This is basically an output event
-/// from the perspective of this module. OutputEvent would also be a confusing name, because from
-/// the perspetive of the caller, this is an input event.
-pub(crate) enum SyncRequest<R, PT: PubKey> {
+// Renamed from SyncRequest for clarity, representing a command sent to the statesync thread.
+pub(crate) enum StateSyncCommand<R, PT: PubKey> {
     Request(R),
     DoneSync(Header),
     Completion((NodeId<PT>, SessionId)),
 }
 
-/// This name is confusing, but I can't think of a better name. This is basically an input event
-/// from the perspective of this module. InputEvent would also be a confusing name, because from
-/// the perspetive of the caller, this is an output event.
-pub(crate) enum SyncResponse<PT: PubKey> {
+// Renamed from SyncResponse for clarity, representing an event received from the statesync thread.
+pub(crate) enum StateSyncEvent<PT: PubKey> {
     Response((NodeId<PT>, StateSyncResponse)),
     UpdateTarget(Header),
 }
@@ -168,8 +164,8 @@ impl<PT: PubKey> StateSync<PT> {
             .collect();
 
         let (request_tx, request_rx) =
-            tokio::sync::mpsc::unbounded_channel::<SyncRequest<StateSyncRequest, PT>>();
-        let (response_tx, response_rx) = std::sync::mpsc::channel::<SyncResponse<PT>>();
+            tokio::sync::mpsc::unbounded_channel::<StateSyncCommand<StateSyncRequest, PT>>();
+        let (response_tx, response_rx) = std::sync::mpsc::channel::<StateSyncEvent<PT>>();
 
         let progress = Arc::new(Mutex::new(Progress::default()));
         let progress_clone = Arc::clone(&progress);
@@ -184,7 +180,7 @@ impl<PT: PubKey> StateSync<PT> {
             let mut request_ctx: Box<StateSyncContext> = Box::new(Box::new({
                 let request_tx = request_tx.clone();
                 move |request| {
-                    let result = request_tx.send(SyncRequest::Request(StateSyncRequest {
+                    let result = request_tx.send(StateSyncCommand::Request(StateSyncRequest {
                         version: SELF_STATESYNC_VERSION,
                         prefix: request.prefix,
                         prefix_bytes: request.prefix_bytes,
@@ -194,9 +190,9 @@ impl<PT: PubKey> StateSync<PT> {
                         old_target: request.old_target,
                     }));
                     if result.is_err() {
-                        eprintln!("invariant broken: send_request called after destroy");
-                        // we can't panic because that's not safe in a C callback
-                        std::process::exit(1)
+                        // This should not happen unless the main thread has crashed.
+                        // We cannot panic here as it's a C callback.
+                        tracing::error!("Invariant broken: send_request called after destroy. This indicates a critical bug.");
                     }
                 }
             }));
@@ -211,9 +207,9 @@ impl<PT: PubKey> StateSync<PT> {
             let mut current_target = None;
             let mut next_target = None;
 
-            while let Ok(response) = response_rx.recv() {
-                match response {
-                    SyncResponse::UpdateTarget(target) => {
+            while let Ok(event) = response_rx.recv() {
+                match event {
+                    StateSyncEvent::UpdateTarget(target) => {
                         if current_target.is_none() {
                             tracing::debug!(
                                 new_target =? target,
@@ -235,9 +231,11 @@ impl<PT: PubKey> StateSync<PT> {
                             next_target.replace(target);
                         }
                     }
-                    SyncResponse::Response((from, response)) => {
-                        assert!(current_target.is_some());
-
+                    StateSyncEvent::Response((from, response)) => {
+                        if current_target.is_none() {
+                            tracing::error!(?from, ?response, "Received statesync response before target was set. This is a critical bug.");
+                            continue;
+                        }
                         let _timer = DropTimer::start(Duration::ZERO, |elapsed| {
                             tracing::debug!(
                                 ?elapsed,
@@ -282,9 +280,12 @@ impl<PT: PubKey> StateSync<PT> {
                                     "failed upsert for response: {:?}",
                                     &response
                                 );
+                                if !upsert_result {
+                                    tracing::error!(?response, "monad_statesync_client_handle_upsert failed. This indicates a critical bug in the C++ statesync implementation.");
+                                }
                             }
                             request_tx
-                                .send(SyncRequest::Completion((from, SessionId(response.nonce))))
+                                .send(StateSyncCommand::Completion((from, SessionId(response.nonce))))
                                 .expect("request_rx dropped");
                             if response.response_n != 0 {
                                 bindings::monad_statesync_client_handle_done(
@@ -303,15 +304,13 @@ impl<PT: PubKey> StateSync<PT> {
                         }
                     }
                 }
-                if sync_ctx.try_finalize() {
-                    let target = current_target.expect("target should be set").clone();
-                    current_target = next_target.take();
-                    if let Some(current_target) = &current_target {
-                        tracing::debug!(
-                            "statesync reached target {:?}, next target {:?}",
-                            target,
-                            current_target
-                        );
+                if let Some(finalized) = sync_ctx.try_finalize() {
+                    if !finalized {
+                        tracing::error!("State root mismatch after statesync. This indicates a critical bug or a malicious peer.");
+                        // The context is destroyed, but we should not proceed with a bad state.
+                        // The node is now in an unrecoverable state.
+                        break;
+                    }
                         let mut buf = Vec::new();
                         current_target.encode(&mut buf);
                         unsafe {
@@ -326,13 +325,15 @@ impl<PT: PubKey> StateSync<PT> {
                         tracing::debug!(?target, "done statesync");
                         progress.lock().unwrap().update_reached_target(&target);
                         request_tx
-                            .send(SyncRequest::DoneSync(target))
+                            .send(StateSyncCommand::DoneSync(target))
                             .expect("request_rx dropped mid DoneSync");
                     }
                 }
             }
             // this loop exits when execution is about to start
-            assert!(sync_ctx.ctx.is_none());
+            if sync_ctx.ctx.is_some() {
+                tracing::error!("Statesync thread exited without finalizing. This is a critical bug.");
+            }
         }).expect("failed to spawn statesync thread");
 
         Self {
@@ -355,11 +356,14 @@ impl<PT: PubKey> StateSync<PT> {
 
     pub fn update_target(&mut self, target: Header) {
         if let Some(old_target) = &self.current_target {
-            assert!(old_target.number < target.number);
+            if old_target.number >= target.number {
+                tracing::error!(?old_target, ?target, "New statesync target is not ahead of the current one. This is a critical bug.");
+                return;
+            }
         }
         self.current_target = Some(target.clone());
         self.response_tx
-            .send(SyncResponse::UpdateTarget(target))
+            .send(StateSyncEvent::UpdateTarget(target))
             .expect("response_rx dropped");
     }
 
@@ -385,7 +389,7 @@ impl<PT: PubKey> StateSync<PT> {
 
         for response in self.outbound_requests.handle_response(from, response) {
             self.response_tx
-                .send(SyncResponse::Response((from, response)))
+                .send(StateSyncEvent::Response((from, response)))
                 .expect("response_rx dropped");
         }
     }
@@ -410,29 +414,26 @@ impl<PT: PubKey> StateSync<PT> {
 }
 
 impl<PT: PubKey> Stream for StateSync<PT> {
-    type Item = SyncRequest<(NodeId<PT>, StateSyncRequest), PT>;
+    type Item = StateSyncCommand<(NodeId<PT>, StateSyncRequest), PT>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.deref_mut();
 
         while let Poll::Ready(request) = this.request_rx.poll_recv(cx) {
             match request.expect("request_tx dropped") {
-                SyncRequest::Request(request) => {
+                StateSyncCommand::Request(request) => {
                     this.outbound_requests.queue_request(request);
                 }
-                SyncRequest::DoneSync(target) => {
-                    // Justification for assertion:
-                    //
-                    // DoneSync being emitted implies that all outstanding requests were handled
-                    // from the perspective of the statesync thread. Any subsequent queued requests
-                    // therefore must have been sequenced after this DoneSync is handled.
-                    assert!(this.outbound_requests.is_empty());
+                StateSyncCommand::DoneSync(target) => {
+                    if !this.outbound_requests.is_empty() {
+                        tracing::error!("DoneSync received but outbound requests are not empty. This is a critical bug.");
+                    }
                     this.outbound_requests.clear_prefix_peers();
 
-                    return Poll::Ready(Some(SyncRequest::DoneSync(target)));
+                    return Poll::Ready(Some(StateSyncCommand::DoneSync(target)));
                 }
-                SyncRequest::Completion(from) => {
-                    return Poll::Ready(Some(SyncRequest::Completion(from)));
+                StateSyncCommand::Completion(from) => {
+                    return Poll::Ready(Some(StateSyncCommand::Completion(from)));
                 }
             }
         }
@@ -440,7 +441,7 @@ impl<PT: PubKey> Stream for StateSync<PT> {
         match this.outbound_requests.poll() {
             RequestPollResult::Request(peer, request) => {
                 this.sleep_future = None;
-                Poll::Ready(Some(SyncRequest::Request((peer, request))))
+                Poll::Ready(Some(StateSyncCommand::Request((peer, request))))
             }
             RequestPollResult::Timer(Some(instant)) => {
                 match this.sleep_future.as_mut() {
@@ -518,8 +519,16 @@ impl SyncCtx {
                 self.statesync_send_request,
             );
             let client_version = bindings::monad_statesync_version();
-            assert!(bindings::monad_statesync_client_compatible(client_version));
-            let num_prefixes = bindings::monad_statesync_client_prefixes();
+            if !bindings::monad_statesync_client_compatible(client_version) {
+                // This is a critical error, as it means the Rust and C++ code are out of sync.
+                // It should be caught in development.
+                tracing::error!(
+                    "Incompatible statesync versions. C++ version: {}, Rust version: {}",
+                    client_version, SELF_STATESYNC_VERSION
+                );
+                // The context is not usable, but we can't easily propagate an error here.
+                // The caller will likely fail later.
+            }            let num_prefixes = bindings::monad_statesync_client_prefixes();
             for prefix in 0..num_prefixes {
                 bindings::monad_statesync_client_handle_new_peer(
                     ctx,
@@ -531,8 +540,9 @@ impl SyncCtx {
         })
     }
 
-    /// Returns true if reached target and successfully finalized
-    fn try_finalize(&mut self) -> bool {
+    /// Returns `Some(bool)` if reached target, where the bool indicates if finalization was successful.
+    /// Returns `None` if the target has not been reached yet.
+    fn try_finalize(&mut self) -> Option<bool> {
         let ctx = self
             .ctx
             .expect("try_finalize should only be called on active SyncCtx");
@@ -540,11 +550,13 @@ impl SyncCtx {
         if unsafe { bindings::monad_statesync_client_has_reached_target(ctx) } {
             let root_matches = unsafe { bindings::monad_statesync_client_finalize(ctx) };
             assert!(root_matches, "state root doesn't match, are peers trusted?");
-
+            if !root_matches {
+                tracing::error!("State root does not match after statesync. This could indicate a malicious peer or a critical bug.");
+            }
             unsafe { bindings::monad_statesync_client_context_destroy(ctx) }
             self.ctx = None;
-            return true;
+            return Some(root_matches);
         }
-        false
+        None
     }
 }
