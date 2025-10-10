@@ -40,6 +40,8 @@ The following issues and risks are considered **known** or **by design** and wil
     - `testnet-2` was recovered by [disabling relaxed merge](https://github.com/category-labs/monad/pull/1735) while a more tailored fix is pending. This bug will be considered out of scope from the time of the crash and for the remainder of the audit competition. Any other findings related to relaxed merge (i.e. outside of this interaction with reserve balance) are still in scope.
     - This `README` will be updated again once the issue has been addressed in full.
 - Nonce overflow check in block validator (C4 staff note: this issue was addressed by a public [PR](https://github.com/category-labs/monad-bft/pull/2388).)
+- Any submissions pertaining to issues identified within the [Spearbit report](https://github.com/category-labs/monad-audits/blob/main/client/202509/spearbit/report-cantinacode-monad-0702.pdf), that are received after **October 9, 2025 at 04:45 UTC**, will be considered out of scope.
+- Any submissions pertaining to issues identified within the [Zellic reports](https://github.com/category-labs/monad-audits/tree/main/client/202509/zellic), that are received after **October 9, 2025 at 05:05 UTC**, will be considered out of scope.
 
 ### General Risks
 
@@ -104,7 +106,7 @@ Contains the Monad consensus client and JsonRpc server. Monad consensus collects
 
 ## Links
 
-- **Previous audits:** previously audited by Zellic and Spearbit, reports being finalized.
+- **Previous audits:** previously audited by [Zellic](https://github.com/category-labs/monad-audits/tree/main/client/202509/zellic) and [Spearbit](https://github.com/category-labs/monad-audits/blob/main/client/202509/spearbit/report-cantinacode-monad-0702.pdf).
 - **Documentation:** https://docs.monad.xyz
   - _Note: Please refer to docs as the source of truth with respect to the MonadBFT specification. The MonadBFT paper is in the process of being updated to align with the implementation._
 - **Website:** https://www.monad.xyz
